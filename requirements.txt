@@ -1,7 +1,7 @@
 streamlit
-torch==2.0.0 
-torchvision==0.15.1
 Pillow
 pandas
 requests
 scikit-learn
+torch@https://www.google.com/search?q=https://download.pytorch.org/whl/cpu/torch-2.0.0%252Bcpu-cp310-cp310-linux_x86_64.whl
+torchvision@https://www.google.com/search?q=https://download.pytorch.org/whl/cpu/torchvision-0.15.1%252Bcpu-cp310-cp310-linux_x86_64.whl
