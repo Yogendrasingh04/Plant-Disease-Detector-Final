@@ -65,7 +65,8 @@ def load_model(num_classes, model_path, device):
     model.fc = nn.Linear(num_ftrs, num_classes)
 
     try:
-        model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device('cpu')))
+        # 'weights_only=False'
+model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device('cpu'), weights_only=False))
         model.to(device)
         model.eval()
         return model
@@ -320,4 +321,5 @@ if uploaded_file is not None:
 
 
 st.markdown("---")
+
 
