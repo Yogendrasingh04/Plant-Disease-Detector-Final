@@ -14,9 +14,9 @@ import time
 device = torch.device('cpu')
 
 # --- NEW: GOOGLE DRIVE CONFIGURATION ---
-# IMPORTANT: Apne Google Drive sharing link ki ID yahan daalein.
-# NOTE: Yah ID "invalid load key" error ka karan bhi ho sakti hai agar sharing theek nahi hai.
-GOOGLE_DRIVE_FILE_ID = '17OWRF9r-9AKvakdimu4nG8tr6Cu17E2p' 
+# IMPORTANT: Ab yahan poora download URL paste karein, ID nahi.
+# NOTE: Mene yahan gdrive.org se generate hua final URL format use kiya hai.
+GOOGLE_DRIVE_DOWNLOAD_URL = 'https://drive.google.com/file/d/17OWRF9r-9AKvakdimu4nG8tr6Cu17E2p/view?usp=sharing' # <--- Is line ko change karna hai!
 MODEL_PATH = 'plant_disease_model.pth' 
 # ----------------------------------------
 
@@ -32,8 +32,8 @@ def download_model_from_gdrive(file_id, output_path):
     if os.path.exists(output_path):
         return
     
-    # URL format jo badi files ke liye zyaada reliable hai
-    URL = f"https://drive.google.com/uc?id={file_id}&export=download"
+    # *** Yahan naya poora URL istemaal hoga (file_id ki jagah) ***
+    URL = GOOGLE_DRIVE_DOWNLOAD_URL 
     
     # Download request
     response = requests.get(URL, stream=True)
@@ -60,7 +60,10 @@ def download_model_from_gdrive(file_id, output_path):
 # --- Model Definition Function ---
 def load_model(num_classes, model_path, device):
     # Pehle model download karein (agar nahi hua hai to)
-    download_model_from_gdrive(GOOGLE_DRIVE_FILE_ID, MODEL_PATH) 
+    # File ID ki jagah ab GOOGLE_DRIVE_DOWNLOAD_URL use ho raha hai
+    # download_model_from_gdrive ko file_id ki jagah poora url pass karna padega, isliye function call badalna hoga.
+    # Lekin download_model_from_gdrive() ab GOOGLE_DRIVE_DOWNLOAD_URL ko use karta hai, isliye sirf yeh:
+    download_model_from_gdrive(None, MODEL_PATH) 
     
     # Model Structure... 
     model = models.resnet50(weights=None)
