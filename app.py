@@ -20,10 +20,8 @@ MODEL_PATH = 'plant_disease_model.pth'
 # ----------------------------------------
 
 # ImageNet means and standard deviations for normalization (Same as Colab)
-# --- FIX FOR NameError: 'IMAGENET_MEAN' is not defined ---
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
-# ----------------------------------------------------------
 
 # --- NEW FUNCTION: Download from Google Drive ---
 @st.cache_resource(show_spinner="⏳ Downloading Model from Google Drive...")
@@ -65,8 +63,9 @@ def load_model(num_classes, model_path, device):
     model.fc = nn.Linear(num_ftrs, num_classes)
 
     try:
-        # 'weights_only=False'
-model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device('cpu'), weights_only=False))
+        # FIXES: IndentationError (Code ab try ke andar 4 space se aage khiska hua hai)
+        # FIXES: PyTorch Loading Error (map_location aur weights_only=False set kiya gaya hai)
+        model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device('cpu'), weights_only=False))
         model.to(device)
         model.eval()
         return model
@@ -74,9 +73,7 @@ model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device('cpu'), w
         st.error(f"Error loading model weights: {e}. Check the model file integrity.")
         st.stop()
         
-        
 # --- Data Transformations for Prediction ---
-# FIX IS APPLIED HERE: IMAGENET_MEAN and IMAGENET_STD are now defined above
 prediction_transforms = transforms.Compose([
     transforms.Resize((256, 256)),
     transforms.ToTensor(),
@@ -84,7 +81,6 @@ prediction_transforms = transforms.Compose([
 ])
 
 # --- Disease Information (Zaroori! Please customize this fully!) ---
-# [CONTENT REMOVED FOR BREVITY] (Ensure your full disease_info dictionary is here)
 disease_info = {
     "Apple___Apple_scab": {
         "plant": "Apple",
@@ -292,6 +288,7 @@ if uploaded_file is not None:
              st.warning("Model file downloading in progress... (This may take a few minutes on the first run).")
 
         with st.spinner('🔬 Running AI Model Analysis... Please wait.'):
+            # Model loading is wrapped in get_model() which handles download/load
             predicted_class, confidence = predict_image_class(image, model, prediction_transforms, class_names)
 
         st.success("✅ Prediction Complete! See results below.")
@@ -321,5 +318,3 @@ if uploaded_file is not None:
 
 
 st.markdown("---")
-
-
