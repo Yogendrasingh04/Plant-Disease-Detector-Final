@@ -6,8 +6,8 @@ import torchvision.models as models
 from PIL import Image
 import os
 import pandas as pd
-import requests # NEW: File download karne ke liye
-import time # NEW: Download speed check ke liye
+import requests 
+import time 
 
 # --- Configuration & Device Setup ---
 # Streamlit deployment ke liye device ko CPU par set karein
@@ -15,28 +15,33 @@ device = torch.device('cpu')
 
 # --- NEW: GOOGLE DRIVE CONFIGURATION ---
 # IMPORTANT: Apne Google Drive sharing link ki ID yahan daalein.
-GOOGLE_DRIVE_FILE_ID = '17OWRF9r-9AKvakdimu4nG8tr6Cu17E2p' # <-- Yahan ID badle!
+# NOTE: Yah ID "invalid load key" error ka karan bhi ho sakti hai agar sharing theek nahi hai.
+GOOGLE_DRIVE_FILE_ID = '17OWRF9r-9AKvakdimu4nG8tr6Cu17E2p' 
 MODEL_PATH = 'plant_disease_model.pth' 
 # ----------------------------------------
 
-# ImageNet means and standard deviations for normalization (Same as Colab)
+# ImageNet means and standard deviations for normalization
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
 IMAGENET_STD = [0.229, 0.224, 0.225]
 
 # --- NEW FUNCTION: Download from Google Drive ---
-@st.cache_resource(show_spinner="⏳ Downloading Model from Google Drive...")
+@st.cache_resource(show_spinner="⏳ Model ko Google Drive se download kiya ja raha hai...")
 def download_model_from_gdrive(file_id, output_path):
+    """Downloads the large model file from Google Drive."""
     # Agar model pehle se downloaded hai to skip karein
     if os.path.exists(output_path):
         return
-
-    URL = f"https://drive.google.com/uc?export=download&id={file_id}"
+    
+    # URL format jo badi files ke liye zyaada reliable hai
+    URL = f"https://drive.google.com/uc?id={file_id}&export=download"
     
     # Download request
     response = requests.get(URL, stream=True)
     
+    # Check for download error (like permission denied or file not found)
     if response.status_code != 200:
-        st.error(f"❌ Error downloading model (Status Code: {response.status_code}). Check your File ID and sharing permissions.")
+        st.error(f"❌ Model download karne mein error (Status Code: {response.status_code}). Kripya apni File ID aur sharing permissions (Anyone with the link) check karein.")
+        st.stop()
         return
 
     # Write content to the file path
@@ -63,14 +68,14 @@ def load_model(num_classes, model_path, device):
     model.fc = nn.Linear(num_ftrs, num_classes)
 
     try:
-        # FIXES: IndentationError (Code ab try ke andar 4 space se aage khiska hua hai)
-        # FIXES: PyTorch Loading Error (map_location aur weights_only=False set kiya gaya hai)
+        # Indentation, map_location, aur weights_only=False fix kiye gaye hain
         model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device('cpu'), weights_only=False))
         model.to(device)
         model.eval()
         return model
     except Exception as e:
-        st.error(f"Error loading model weights: {e}. Check the model file integrity.")
+        # Agar model load nahi hota, to user ko batao aur app rok do
+        st.error(f"Error loading model weights: {e}. PyTorch version mismatch ya model file corrupted ho sakta hai.")
         st.stop()
         
 # --- Data Transformations for Prediction ---
@@ -130,7 +135,7 @@ disease_info = {
         "symptoms": "Mottling, curling, aur patton ka vikriti (distortion), ruka hua vikas.",
         "treatment": "Koi ilaaj nahi; sankramit paudhon ko hata dein, upkaranon ko sanitize karein."
     },
-    # Please ensure all 38 classes are present here in your final file
+    # Ensure all 38 classes are present here in your final file
 }
 disease_df = pd.DataFrame.from_dict(disease_info, orient='index')
 
