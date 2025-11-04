@@ -1,185 +1,303 @@
 import streamlit as st
 import torch
+import torch.nn as nn
 from torchvision import transforms
-import torchvision.models as models # ResNet ke liye zaroori
+import torchvision.models as models 
 from PIL import Image
-import io
-import requests
-import torch.nn.functional as F # Prediction ke liye zaroori
+import requests # Hugging Face URL se load karne ke liye zaroori
+import torch.nn.functional as F 
+import pandas as pd
+import io # Agar hum requests.get se load karein (yahan zaroorat nahi, par achhi practice hai)
 
-# ----------------- CONFIGURATION -----------------
+# --- Configuration & Device Setup ---
+# Streamlit deployment ke liye device ko CPU par set karein
+device = torch.device('cpu')
 
+# --- HUGGING FACE CONFIGURATION ---
 # 1. ZAROORI: Yahan apna Hugging Face se copy kiya hua Direct Download Link daalein.
 # Yeh link sidha model (.pth) file par hona chahiye, koi HTML page nahi.
+# Maine aapka pichla link wapas daal diya hai.
 HUGGING_FACE_MODEL_URL = "https://huggingface.co/Yogendra12/plant-disease-classifier/resolve/main/plant_disease_model.pth" 
+# ----------------------------------------
 
-# Model ke liye class names (Aapke original dataset se match hone chahiye)
-CLASS_NAMES = [
-    "Healthy", 
-    "Bacterial Blight", 
-    "Early Blight", 
-    "Late Blight",
-    # Agar aapke paas aur classes hain toh yahan daalein
+# ImageNet means and standard deviations for normalization
+IMAGENET_MEAN = [0.485, 0.456, 0.406]
+IMAGENET_STD = [0.229, 0.224, 0.225]
+
+
+# --- Model Class Names (38 Classes - Aapke code se copy kiye gaye) ---
+class_names = [
+    'Apple__Apple_scab', 'Apple_Black_rot', 'Apple_Cedar_apple_rust', 'Apple__healthy',
+    'Blueberry__healthy', 'Cherry(including_sour)Powdery_mildew', 'Cherry(including_sour)_healthy',
+    'Corn_(maize)Cercospora_leaf_spot_Gray_leaf_spot', 'Corn(maize)_Common_rust',
+    'Corn_(maize)Northern_Leaf_Blight', 'Corn(maize)healthy', 'Grape__Black_rot',
+    'Grape__Esca(Black_Measles)', 'Grape__Leaf_blight(Isariopsis_Leaf_Spot)', 'Grape___healthy',
+    'Orange__Haunglongbing(Citrus_greening)', 'Peach__Bacterial_spot', 'Peach__healthy',
+    'Pepper,bell_Bacterial_spot', 'Pepper,_bell_healthy', 'Potato__Early_blight',
+    'Potato__Late_blight', 'Potato_healthy', 'Raspberry_healthy', 'Soybean__healthy',
+    'Squash__Powdery_mildew', 'Strawberry_Leaf_scorch', 'Strawberry__healthy',
+    'Tomato__Bacterial_spot', 'Tomato_Early_blight', 'Tomato_Late_blight', 'Tomato__Leaf_Mold',
+    'Tomato__Septoria_leaf_spot', 'Tomato_Spider_mites_Two-spotted_spider_mite', 'Tomato__Target_Spot',
+    'Tomato__Tomato_mosaic_virus', 'Tomato_Tomato_Yellow_Leaf_Curl_Virus', 'Tomato__healthy'
 ]
-NUM_CLASSES = len(CLASS_NAMES)
+NUM_CLASSES = len(class_names) # 38 classes
 
 
-# ----------------- MODEL LOADING FUNCTION -----------------
+# --- Disease Information (Aapke code se copy kiya gaya) ---
+disease_info = {
+    "Apple__Apple_scab": {
+        "plant": "Apple",
+        "disease": "Apple Scab",
+        "symptoms": "Patto, phal aur tehniyon par olive-green se brown spots.",
+        "treatment": "Infected patto ko hatayein, Captan ya Myclobutanil jaisi fungicid istemal karein, resistant kism chunein."
+    },
+    "Tomato__healthy": {
+        "plant": "Tomato",
+        "disease": "Healthy",
+        "symptoms": "Patte hare bhare, majboot tana, phal ka accha vikas.",
+        "treatment": "Samay par pani dein, santulit khaad aur kitnashak niyantran rakhein."
+    },
+    'Apple_Black_rot': {
+        "plant": "Apple",
+        "disease": "Black Rot",
+        "symptoms": "Patto par gol brown daag, phal par bade aur sade hue kaale spots.",
+        "treatment": "Bimar tehniyon ko kaat dein, sade hue phal hata dein, fungicid lagayein."
+    },
+    'Apple_Cedar_apple_rust': {
+        "plant": "Apple",
+        "disease": "Cedar Apple Rust",
+        "symptoms": "Apple ke patto par chamakdaar narangi spots. Phal ko bhi affect kar sakta hai.",
+        "treatment": "Cedar ke pedon ke paas lagane se bachein, rust-resistant kism chunein."
+    },
+    'Tomato_Early_blight': {
+        "plant": "Tomato",
+        "disease": "Early Blight",
+        "symptoms": "Purane patto par target-jaisi concentric rings wale gehre brown spots.",
+        "treatment": "Faslon ka chakkar (crop rotation) karein, fungicid lagayein, bimar patton ko hata dein."
+    },
+    'Tomato_Late_blight': {
+        "plant": "Tomato",
+        "disease": "Late Blight",
+        "symptoms": "Irregular, pani se bhege hue lesions jo jaldi failte hain, niche ki taraf safed fungal growth.",
+        "treatment": "Resistant kism lagayein, fungicid use karein, acchi hawa ka sanchar banayein."
+    },
+    'Potato_healthy': {
+        "plant": "Potato",
+        "disease": "Healthy",
+        "symptoms": "Pattiyan tez hari aur majboot vikas.",
+        "treatment": "Uchit unchai tak mitti chadayein, santulit poshak tatva aur paryapt pani dein."
+    },
+    'Tomato__Tomato_mosaic_virus': {
+        "plant": "Tomato",
+        "disease": "Tomato Mosaic Virus",
+        "symptoms": "Mottling, curling, aur patton ka vikriti (distortion), ruka hua vikas.",
+        "treatment": "Koi ilaaj nahi; sankramit paudhon ko hata dein, upkaranon ko sanitize karein."
+    },
+    # Baki classes ki info yahan aaegi
+}
+disease_df = pd.DataFrame.from_dict(disease_info, orient='index')
 
-# Model ko memory mein cache karna (sirf ek baar load hoga)
-@st.cache_resource
+
+# --- Model Definition and Loading (Hugging Face) ---
+@st.cache_resource(show_spinner="⏳ Model weights Hugging Face se download/load kiye ja rahe hain...")
 def load_model():
-    """Hugging Face se ResNet model weights download aur load karta hai."""
-    st.info("🌐 Hugging Face se ResNet model weights download ki jaa rahi hain (Sirf pehli baar).")
+    """Hugging Face URL se ResNet-50 model weights load karta hai."""
     
     try:
         # Weights ko URL se download karke load karna
-        # Ab yeh function seedha binary data download karega, HTML nahi.
         weights = torch.hub.load_state_dict_from_url(
             HUGGING_FACE_MODEL_URL, 
-            map_location='cpu', # CPU par load karna sabse achha hai
+            map_location=device, # device='cpu'
             progress=True
         )
         
-        # FINAL MODEL ARCHITECTURE DEFINITION (ResNet-18)
-        # Agar aapne ResNet-18 ke bajaye koi aur model (jaise ResNet-50) use kiya tha, 
-        # toh 'models.resnet18' ko 'models.resnet50' se badal dein.
-        model = models.resnet18(pretrained=False) 
+        # 🚨 ResNet-50 Architecture Definition (Aapke size mismatch error ke anusaar)
+        model = models.resnet50(weights=None) 
 
-        # Final Fully Connected layer ko custom classes ke anusaar badalna
-        num_ftrs = model.fc.in_features
-        model.fc = torch.nn.Linear(num_ftrs, NUM_CLASSES)
+        # Final Fully Connected layer ko 38 classes ke anusaar badalna
+        num_ftrs = model.fc.in_features # ResNet-50 ke liye yeh 2048 hoga
+        model.fc = nn.Linear(num_ftrs, NUM_CLASSES)
         
         # Weights ko model mein load karna
-        model.load_state_dict(weights, strict=False) 
-        model.eval() # Evaluation mode mein set karna
-        st.success("✅ ResNet Model weights safaltapoorvak (successfully) load ho gaye hain!")
+        # weights_only=False zaroori nahi hai kyunki hum seedha state_dict load kar rahe hain.
+        model.load_state_dict(weights) 
+        model.to(device)
+        model.eval() 
+
+        st.success("✅ ResNet-50 Model safaltapoorvak (successfully) load ho gaya hai!")
         return model
     
     except requests.exceptions.HTTPError as e:
-        st.error(f"❌ Download Error: HTTP Status {e.response.status_code}. Link ya File ID check karein.")
-        st.error("Kripya Hugging Face ka direct download link (jis par end mein `resolve/main/filename` ho) check karein.")
-        return None
+        st.error(f"❌ Download Error: HTTP Status {e.response.status_code}. Hugging Face link ya permissions check karein.")
+        st.stop()
     except Exception as e:
-        st.error(f"❌ Model Loading Error: {e}")
-        st.error(f"Pक्का करें ki model architecture (ResNet-18) aapke weights file se match karta hai. Original error: {e}")
-        return None
+        # Size Mismatch Error ya koi aur error yahan aayega
+        st.error(f"❌ Model Loading Error: {e}. Kripya dekhein ki aapne ResNet-50 aur 38 classes hi use ki thi.")
+        st.stop()
+        
+# --- Load Model (Caching for efficiency) ---
+model = load_model()
 
-# ----------------- PREDICTION AND UI LOGIC -----------------
+# --- Data Transformations for Prediction ---
+prediction_transforms = transforms.Compose([
+    transforms.Resize((256, 256)),
+    transforms.ToTensor(),
+    transforms.Normalize(IMAGENET_MEAN, IMAGENET_STD)
+])
 
-def classify_image(model, image):
-    """Image ko pre-process karta hai aur prediction deta hai."""
+# --- Prediction Function (Aapke code se copy kiya gaya) ---
+def predict_image_class(image, model, transforms, class_names):
+    image = transforms(image).unsqueeze(0)
+    image = image.to(device)
+
+    with torch.no_grad():
+        outputs = model(image)
+        probabilities = torch.softmax(outputs, dim=1)
+        confidence, predicted_idx = torch.max(probabilities, 1)
+
+    predicted_class = class_names[predicted_idx.item()]
+    confidence_percent = confidence.cpu().item() * 100
     
-    # Image transformations: ResNet training ke anusaar
-    transform = transforms.Compose([
-        transforms.Resize(256),
-        transforms.CenterCrop(224), # ResNet standard input size
-        transforms.ToTensor(),
-        # Standard ImageNet normalization values (Yeh aapke training se match honi chahiye)
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
+    return predicted_class, confidence_percent
 
-    try:
-        # Image ko tensor mein badalna
-        input_tensor = transform(image)
-        input_batch = input_tensor.unsqueeze(0) # Batch dimension add karna
-        
-        # Model se prediction
-        with torch.no_grad():
-            # Model ko CPU par chalana
-            output = model(input_batch)
-            
-        # Output ko probabilities mein badalna
-        probabilities = F.softmax(output[0], dim=0)
-        
-        # Sabse zyada probability wala result
-        predicted_index = torch.argmax(probabilities).item()
-        predicted_class = CLASS_NAMES[predicted_index]
-        confidence = probabilities[predicted_index].item()
-        
-        return predicted_class, confidence
 
-    except Exception as e:
-        st.error(f"Prediction Error: {e}")
-        return "Error", 0.0
+# --- Streamlit App UI (Stylish & Attractive - DARK MODE) ---
 
-# ----------------- STREAMLIT APP -----------------
+st.set_page_config(
+    page_title="Plant Disease Detector",
+    page_icon="🌿",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
 
-def main():
-    st.set_page_config(page_title="Plant Disease Classifier", layout="centered")
+# Custom CSS for DARK MODE Styling
+st.markdown("""
+<style>
+/* Main Background and Layout */
+.stApp {
+    background-color: #1E1E1E; /* Dark Grey / Black */
+    color: #F0F0F0; /* Off-White Text */
+    font-family: 'Arial', sans-serif;
+}
+/* Header Styling */
+h1 {
+    color: #4CAF50; /* Bright Green */
+    text-align: center;
+    font-size: 2.5em;
+    padding-bottom: 0.5em;
+    border-bottom: 2px solid #38761D; /* Darker Green underline */
+}
+/* Sub-header (h2, h3, h4) styling */
+h3, h4 {
+    color: #90EE90; /* Light Green */
+}
+/* Custom Button Styling */
+.stButton>button {
+    background-color: #4CAF50; /* Green Button */
+    color: #1E1E1E; /* Dark Text */
+    border-radius: 12px;
+    padding: 10px 24px;
+    font-size: 16px;
+    transition-duration: 0.4s;
+    border: 2px solid #4CAF50;
+    margin-top: 15px;
+    width: 100%; /* Full width button */
+}
+.stButton>button:hover {
+    background-color: #38761D; /* Darker Green hover */
+    color: #F0F0F0;
+    border: 2px solid #4CAF50;
+}
 
-    st.markdown("""
-        <style>
-            .stApp {background-color: #f0f2f6;}
-            .main-header {color: #1E90FF; text-align: center; font-size: 2.5em; margin-bottom: 0.5em;}
-            /* Button styling for better look */
-            .stButton>button {
-                background-color: #4CAF50; 
-                color: white; 
-                font-weight: bold; 
-                border-radius: 12px;
-                padding: 10px 24px;
-                transition: background-color 0.3s;
-            }
-            .stButton>button:hover {
-                background-color: #45a049;
-            }
-        </style>
-        <h1 class="main-header">🍃 Plant Disease Classifier</h1>
-        <p style="text-align: center; color: #555;">Kisaan ki madad ke liye - Poudhe ke patte ki tasveer upload karein aur rog ki jaankari paayein.</p>
-    """, unsafe_allow_html=True)
-    
-    # Model Load Karna
-    model = load_model()
+/* Info, Success, Warning boxes style */
+div[data-testid="stAlert"] {
+    border-radius: 10px;
+}
+div.stSuccess {
+    background-color: #004d00; /* Darker green success box */
+    color: #90EE90;
+}
+div.stWarning {
+    background-color: #333300; /* Dark yellow warning box */
+    color: #FFFF99;
+}
+div.stInfo {
+    background-color: #003366; /* Dark blue info box */
+    color: #ADD8E6;
+}
+/* Expander style */
+.streamlit-expanderHeader {
+    background-color: #333333; /* Darker Expander background */
+    color: #4CAF50;
+    font-weight: bold;
+    border-radius: 8px;
+    padding: 10px;
+}
+</style>
+""", unsafe_allow_html=True)
 
-    if model is None:
-        st.warning("Model load nahi ho paya. Kripya upar diye gaye errors ko theek karein.")
-        return
 
-    st.subheader("🖼️ Tasveer Upload Karein")
+# --- UI Content ---
+
+st.markdown("<h1 style='color: #4CAF50; text-align: center;'>🌿 Smart Plant Disease Diagnoser 🌿</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center; font-size: 18px; color: #CCCCCC;'>Upload a leaf image and get instant diagnosis and tailored treatment plans.</p>", unsafe_allow_html=True)
+
+st.markdown("---")
+
+# File Uploader Section
+col1, col2, col3 = st.columns([1, 4, 1])
+
+with col2:
     uploaded_file = st.file_uploader(
-        "PNG/JPG format mein poudhe ke patte ki tasveer chunein...", 
-        type=["jpg", "jpeg", "png"]
+        "*Upload Your Plant Leaf Image Here:*",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=False,
+        help="Make sure the leaf is clearly visible and centered for best results."
     )
 
-    if uploaded_file is not None:
-        try:
-            # Image ko PIL format mein kholna
-            image = Image.open(uploaded_file).convert('RGB')
-            
-            col1, col2 = st.columns([1, 2])
-            
-            with col1:
-                st.image(image, caption='Uploaded Image.', use_column_width=True)
-            
-            with col2:
-                # Prediction button
-                if st.button("🔍 Rog (Disease) Pehchanein"):
-                    with st.spinner('Pehchaan ki jaa rahi hai...'):
-                        predicted_class, confidence = classify_image(model, image)
+if uploaded_file is not None:
+    # --- Display and Prediction Section ---
+    image = Image.open(uploaded_file).convert('RGB')
 
-                    st.markdown("---")
-                    st.subheader("🎯 Nateeja (Result)")
-                    
-                    if predicted_class == "Error":
-                         st.error("Prediction mein internal error aaya.")
-                    else:
-                        st.metric(
-                            label="Pehchana Gaya Rog", 
-                            value=predicted_class
-                        )
-                        # Confidence ko progress bar se dikhana
-                        st.progress(confidence) 
-                        st.write(f"Vishwaas Star (Confidence): **{confidence*100:.2f}%**")
-                        
-                        if predicted_class == "Healthy":
-                            st.success("Bahut badhiya! Poudha swasth (healthy) lagta hai.")
-                        else:
-                            st.warning(f"Savdhani! Yeh {predicted_class} ho sakta hai. Ilaaj ke liye salah lein.")
+    # Use columns to display image and results side-by-side
+    st.markdown("## 🔎 Analysis in Progress")
+    img_col, result_col = st.columns([1, 1])
+
+    with img_col:
+        st.subheader("Uploaded Leaf Image")
+        st.image(image, use_column_width=True, caption=uploaded_file.name)
+
+    with result_col:
+        st.subheader("Diagnosis Status")
+        
+        with st.spinner('🔬 Running AI Model Analysis... Please wait.'):
+            # Model loading is wrapped in get_model() which handles download/load
+            predicted_class, confidence = predict_image_class(image, model, prediction_transforms, class_names)
+
+        st.success("✅ Prediction Complete! See results below.")
+        st.markdown("---")
+        
+        # --- Result Display ---
+        st.markdown("#### *Prediction Result:*")
+
+        if predicted_class in disease_df.index:
+            info = disease_df.loc[predicted_class]
+
+            # Displaying Plant and Disease Name (Using specific colors for contrast)
+            st.markdown(f"🌱 Plant Name:** <span style='color: #4CAF50;'>{info['plant']}</span>", unsafe_allow_html=True)
+            st.markdown(f"🚨 Disease Name:** <span style='color: #FF6347; font-weight: bold;'>{info['disease']}</span>", unsafe_allow_html=True)
+            st.markdown(f"📈 Confidence:** <span style='color: #ADD8E6;'>{confidence:.2f}%</span>", unsafe_allow_html=True)
+
+            # --- Symptoms and Treatment in Expander ---
+            st.markdown("---")
+            st.markdown("🔍 Key Symptoms:")
+            st.warning(info['symptoms'])
+
+            with st.expander("🩺 *CLICK HERE FOR COMPLETE TREATMENT PLAN*", expanded=True):
+                st.markdown(f"*Recommendation:* {info['treatment']}")
+        else:
+            st.error(f"Prediction found, but detailed information for: {predicted_class} is missing.")
+            st.write(f"*Confidence:* {confidence:.2f}%")
 
 
-        except Exception as e:
-            st.error(f"Tasveer process karne mein error: {e}")
-
-if __name__ == '__main__':
-    main()
+st.markdown("---")
