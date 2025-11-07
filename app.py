@@ -9,14 +9,10 @@ import torch.nn.functional as F
 import pandas as pd
 import io # Agar hum requests.get se load karein (yahan zaroorat nahi, par achhi practice hai)
 
-# --- Configuration & Device Setup ---
-# Streamlit deployment ke liye device ko CPU par set karein
+
 device = torch.device('cpu')
 
-# --- HUGGING FACE CONFIGURATION ---
-# 1. ZAROORI: Yahan apna Hugging Face se copy kiya hua Direct Download Link daalein.
-# Yeh link sidha model (.pth) file par hona chahiye, koi HTML page nahi.
-# Maine aapka pichla link wapas daal diya hai.
+
 HUGGING_FACE_MODEL_URL = "https://huggingface.co/Yogendra12/plant-disease-classifier/resolve/main/plant_disease_model.pth" 
 # ----------------------------------------
 
@@ -301,3 +297,4 @@ if uploaded_file is not None:
 
 
 st.markdown("---")
+
